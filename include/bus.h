@@ -1,3 +1,4 @@
+#pragma once
 #include <stdint.h>
 #include "cpu.h"
 #include "ppu.h"
@@ -10,5 +11,6 @@ struct BUS {
 	struct Cart *cart;
 };
 
-uint8_t bus_read8(struct BUS *bus, uint16_t addr);
+uint8_t bus_read(struct BUS *bus, uint16_t addr);
+void bus_write(struct BUS *bus, uint16_t addr, uint8_t value);
 
