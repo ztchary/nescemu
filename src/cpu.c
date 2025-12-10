@@ -439,8 +439,6 @@ void cpu_op_tya(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu_set_zn(cpu->reg_a);
 }
 
-// @trevor do these for me
-
 void cpu_op_alr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
 	cpu->reg_a &= cpu_read(addr);
