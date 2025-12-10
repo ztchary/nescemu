@@ -1,5 +1,4 @@
 #include "cpu.h"
-#include <stdio.h>
 
 #define cpu_read(addr) cpu->bus_read(cpu->bus, addr)
 #define cpu_write(addr, value) cpu->bus_write(cpu->bus, addr, value)
@@ -98,7 +97,7 @@ uint16_t cpu_get_opaddr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 void cpu_add_acc(struct CPU *cpu, uint8_t value) {
 	int x = cpu->reg_a + value + cpu->reg_c.C;
 	cpu->reg_c.C = x >> 8;
-	cpu->reg_c.V = (~(cpu->reg_a ^ value) & (cpu->reg_a ^ x)) >> 7;
+	cpu->reg_c.V = ((value ^ x) & (cpu->reg_a ^ x)) >> 7;
 	cpu->reg_a = x;
 	cpu_set_zn(cpu->reg_a);
 }
@@ -450,9 +449,24 @@ void cpu_op_alr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu_set_zn(cpu->reg_a);
 }
 
-void cpu_op_anc(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
-void cpu_op_ane(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
-void cpu_op_arr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
+void cpu_op_anc(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
+	cpu->reg_a &= cpu_read(addr);
+	cpu_set_zn(cpu->reg_a);
+	cpu->reg_c.C = cpu->reg_c.N;
+};
+
+void cpu_op_ane(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	(void)cpu_get_opaddr(cpu, addrmode);
+};
+
+void cpu_op_arr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
+	cpu->reg_a &= cpu_read(addr);
+	cpu->reg_a = (cpu->reg_a >> 1) | (cpu->reg_c.C << 7);
+	cpu->reg_c.C = cpu->reg_a >> 6;
+	cpu->reg_c.V = ((cpu->reg_a >> 1) ^ (cpu->reg_a)) >> 5;
+};
 
 void cpu_op_dcp(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
@@ -468,8 +482,15 @@ void cpu_op_isc(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu_add_acc(cpu, ~val);
 };
 
-void cpu_op_jam(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
-void cpu_op_las(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
+void cpu_op_jam(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	cpu->jammed = true;
+};
+
+void cpu_op_las(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
+	cpu->reg_a = cpu->reg_x = cpu->reg_sp = cpu->reg_sp & cpu_read(addr);
+	cpu_set_zn(cpu->reg_a);
+};
 
 void cpu_op_lax(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
@@ -477,7 +498,11 @@ void cpu_op_lax(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu_set_zn(cpu->reg_a);
 };
 
-void cpu_op_lxa(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
+void cpu_op_lxa(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
+	cpu->reg_a = cpu->reg_x = cpu_read(addr);
+	cpu_set_zn(cpu->reg_a);
+};
 
 void cpu_op_rla(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
@@ -505,10 +530,27 @@ void cpu_op_sax(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu_write(addr, cpu->reg_a & cpu->reg_x);
 };
 
-void cpu_op_sbx(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
-void cpu_op_sha(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
-void cpu_op_shx(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
-void cpu_op_shy(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
+void cpu_op_sbx(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
+	cpu->reg_x = (cpu->reg_a & cpu->reg_x) - cpu_read(addr);
+	cpu->reg_c.C = !(cpu->reg_x >> 8);
+	cpu_set_zn(cpu->reg_x);
+};
+
+void cpu_op_sha(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
+	cpu_write(addr, cpu->reg_a);
+};
+
+void cpu_op_shx(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
+	cpu_write(addr, cpu->reg_x);
+};
+
+void cpu_op_shy(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
+	cpu_write(addr, cpu->reg_y);
+};
 
 void cpu_op_slo(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
@@ -530,7 +572,9 @@ void cpu_op_sre(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu_set_zn(cpu->reg_a);
 };
 
-void cpu_op_tas(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
+void cpu_op_tas(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
+	(void)cpu_get_opaddr(cpu, addrmode);
+};
 
 void cpu_op_usb(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu_op_sbc(cpu, addrmode);
