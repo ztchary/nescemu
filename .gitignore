@@ -1,3 +1,5 @@
 main
 a.out
 cputest/cputest
+cputest/nestest.log2
+*.gch

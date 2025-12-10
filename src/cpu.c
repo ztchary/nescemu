@@ -12,6 +12,29 @@
 #define cpu_push16(value) uint16_t v = value; cpu_push(v >> 8); cpu_push(v & 0xff)
 #define cpu_pull16() (cpu_pull() | (cpu_pull() << 8))
 
+enum CPU_ADDRMODE {
+	CPU_ADDR_IMM,
+	CPU_ADDR_REL,
+	CPU_ADDR_ZPG,
+	CPU_ADDR_ZPX,
+	CPU_ADDR_ZPY,
+	CPU_ADDR_ABS,
+	CPU_ADDR_ABX,
+	CPU_ADDR_ABY,
+	CPU_ADDR_IND,
+	CPU_ADDR_INX,
+	CPU_ADDR_INY,
+	CPU_ADDR_IMP,
+	CPU_ADDR_ACC,
+};
+
+struct cpu_instruction {
+	enum CPU_ADDRMODE addrmode;
+	void (*opf)(struct CPU *, enum CPU_ADDRMODE);
+	int cycles;
+	bool inc_cross;
+};
+
 extern struct cpu_instruction cpu_instruction_map[];
 
 int cpu_tick(struct CPU *cpu) {
