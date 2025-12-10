@@ -1,49 +1,70 @@
 #include "cpu.h"
 #include <stdio.h>
 
+#define cpu_read(addr) cpu->bus_read(cpu->bus, addr)
+#define cpu_write(addr, value) cpu->bus_write(cpu->bus, addr, value)
+
+#define cpu_set_zn(value) uint8_t v = value; cpu->reg_c.Z = v == 0; cpu->reg_c.N = v >> 7
+
+#define cpu_push(value) cpu_write((cpu->reg_sp--) | 0x100, value)
+#define cpu_pull() cpu_read((++cpu->reg_sp) | 0x100)
+
+#define cpu_push16(value) uint16_t v = value; cpu_push(v >> 8); cpu_push(v & 0xff)
+#define cpu_pull16() (cpu_pull() | (cpu_pull() << 8))
+
+extern struct cpu_instruction cpu_instruction_map[];
+
+int cpu_tick(struct CPU *cpu) {
+	uint8_t op = cpu_read(cpu->reg_pc++);
+	struct cpu_instruction inst = cpu_instruction_map[op];
+	cpu->inc_cycles = 0;
+	inst.opf(cpu, inst.addrmode);
+	return inst.cycles + inst.inc_cross * cpu->inc_cycles;
+}
+
 uint16_t cpu_get_opaddr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint8_t lo, hi, ptr, ptrhi;
 	switch (addrmode) {
 	case CPU_ADDR_IMM:
 		return (uint16_t)cpu->reg_pc++;
 	case CPU_ADDR_REL:
-		int8_t off = (int8_t)cpu->bus_read(cpu->bus, cpu->reg_pc++);
+		int8_t off = (int8_t)cpu_read(cpu->reg_pc++);
 		return (uint16_t)(cpu->reg_pc + off);
 	case CPU_ADDR_ZPG:
-		return cpu->bus_read(cpu->bus, cpu->reg_pc++);
+		return cpu_read(cpu->reg_pc++);
 	case CPU_ADDR_ZPX:
-		return (uint8_t)(cpu->bus_read(cpu->bus, cpu->reg_pc++) + cpu->reg_x);
+		return (uint8_t)(cpu_read(cpu->reg_pc++) + cpu->reg_x);
 	case CPU_ADDR_ZPY:
-		return (uint8_t)(cpu->bus_read(cpu->bus, cpu->reg_pc++) + cpu->reg_y);
+		return (uint8_t)(cpu_read(cpu->reg_pc++) + cpu->reg_y);
 	case CPU_ADDR_ABS:
-		lo = cpu->bus_read(cpu->bus, cpu->reg_pc++);
-		hi = cpu->bus_read(cpu->bus, cpu->reg_pc++);
+		lo = cpu_read(cpu->reg_pc++);
+		hi = cpu_read(cpu->reg_pc++);
 		return hi << 8 | lo;
 	case CPU_ADDR_ABX:
-		lo = cpu->bus_read(cpu->bus, cpu->reg_pc++);
-		hi = cpu->bus_read(cpu->bus, cpu->reg_pc++);
+		lo = cpu_read(cpu->reg_pc++);
+		hi = cpu_read(cpu->reg_pc++);
 		cpu->inc_cycles = (lo + cpu->reg_x) >> 8;
 		return (uint16_t)((hi << 8 | lo) + cpu->reg_x);
 	case CPU_ADDR_ABY:
-		lo = cpu->bus_read(cpu->bus, cpu->reg_pc++);
-		hi = cpu->bus_read(cpu->bus, cpu->reg_pc++);
+		lo = cpu_read(cpu->reg_pc++);
+		hi = cpu_read(cpu->reg_pc++);
 		cpu->inc_cycles = (lo + cpu->reg_y) >> 8;
 		return (uint16_t)((hi << 8 | lo) + cpu->reg_y);
 	case CPU_ADDR_IND:
-		ptr = cpu->bus_read(cpu->bus, cpu->reg_pc++);
-		ptrhi = cpu->bus_read(cpu->bus, cpu->reg_pc++);
-		lo = cpu->bus_read(cpu->bus, ptrhi << 8 | ptr++);
-		hi = cpu->bus_read(cpu->bus, ptrhi << 8 | ptr++);
+		ptr = cpu_read(cpu->reg_pc++);
+		ptrhi = cpu_read(cpu->reg_pc++);
+		lo = cpu_read(ptrhi << 8 | ptr++);
+		hi = cpu_read(ptrhi << 8 | ptr++);
 		return hi << 8 | lo;
 	case CPU_ADDR_INX:
-		ptr = cpu->bus_read(cpu->bus, cpu->reg_pc++) + cpu->reg_x;
-		lo = cpu->bus_read(cpu->bus, ptr++);
-		hi = cpu->bus_read(cpu->bus, ptr++);
+		ptr = cpu_read(cpu->reg_pc++) + cpu->reg_x;
+		lo = cpu_read(ptr++);
+		hi = cpu_read(ptr++);
 		return hi << 8 | lo;
 	case CPU_ADDR_INY:
-		ptr = cpu->bus_read(cpu->bus, cpu->reg_pc++);
-		lo = cpu->bus_read(cpu->bus, ptr++);
-		hi = cpu->bus_read(cpu->bus, ptr++);
+		ptr = cpu_read(cpu->reg_pc++);
+		lo = cpu_read(ptr++);
+		hi = cpu_read(ptr++);
 		cpu->inc_cycles = (lo + cpu->reg_y) >> 8;
 		return (hi << 8 | lo) + cpu->reg_y;
 	default:
@@ -51,48 +72,16 @@ uint16_t cpu_get_opaddr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	}
 }
 
-void cpu_push(struct CPU *cpu, uint8_t value) {
-	cpu->bus_write(cpu->bus, (cpu->reg_sp--) | 0x100, value);
-}
-
-uint8_t cpu_pull(struct CPU *cpu) {
-	return cpu->bus_read(cpu->bus, (++cpu->reg_sp) | 0x100);
-}
-
-void cpu_push16(struct CPU *cpu, uint16_t value) {
-	cpu_push(cpu, value >> 8);
-	cpu_push(cpu, value & 0xff);
-}
-
-uint16_t cpu_pull16(struct CPU *cpu) {
-	uint16_t lo = cpu_pull(cpu);
-	uint16_t hi = cpu_pull(cpu);
-	return (hi << 8) | lo;
-}
-
-void cpu_set_zn(struct CPU *cpu, uint8_t value) {
-	cpu->reg_c.Z = value == 0;
-	cpu->reg_c.N = value >> 7;
-}
-
-uint8_t cpu_get_status(struct CPU *cpu, uint8_t value, bool b) {
-	return (cpu->reg_c.raw & 0b11101111) | 0b00100000 | (b ? 0 : 0b00010000);
-}
-
-void cpu_set_status(struct CPU *cpu, uint8_t value) {
-	cpu->reg_c.raw = (value & 0b11101111) | 0b00100000;
-}
-
 void cpu_add_acc(struct CPU *cpu, uint8_t value) {
 	int x = cpu->reg_a + value + cpu->reg_c.C;
 	cpu->reg_c.C = x >> 8;
 	cpu->reg_c.V = (~(cpu->reg_a ^ value) & (cpu->reg_a ^ x)) >> 7;
 	cpu->reg_a = x;
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu_set_zn(cpu->reg_a);
 }
 
 void cpu_branch(struct CPU *cpu, bool cond) {
-	int8_t off = cpu->bus_read(cpu->bus, cpu->reg_pc++);
+	int8_t off = cpu_read(cpu->reg_pc++);
 	if (!cond) return;
 	cpu->inc_cycles++;
 	uint16_t target = cpu->reg_pc + off;
@@ -102,28 +91,28 @@ void cpu_branch(struct CPU *cpu, bool cond) {
 
 void cpu_op_adc(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu_add_acc(cpu, cpu->bus_read(cpu->bus, addr));
+	cpu_add_acc(cpu, cpu_read(addr));
 }
 
 void cpu_op_and(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu->reg_a &= cpu->bus_read(cpu->bus, addr);
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu->reg_a &= cpu_read(addr);
+	cpu_set_zn(cpu->reg_a);
 }
 
 void cpu_op_asl(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	if (addrmode == CPU_ADDR_ACC) {
 		cpu->reg_c.C = cpu->reg_a >> 7;
 		cpu->reg_a <<= 1;
-		cpu_set_zn(cpu, cpu->reg_a);
+		cpu_set_zn(cpu->reg_a);
 		return;
 	}
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	cpu->reg_c.C = val >> 7;
 	val <<= 1;
-	cpu->bus_write(cpu->bus, addr, val);
-	cpu_set_zn(cpu, val);
+	cpu_write(addr, val);
+	cpu_set_zn(val);
 }
 
 void cpu_op_bcc(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
@@ -143,7 +132,7 @@ void cpu_op_beq(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 
 void cpu_op_bit(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	cpu->reg_c.Z = !(cpu->reg_a & val);
 	cpu->reg_c.N = !!(val & 0x80);
 	cpu->reg_c.V = !!(val & 0x40);
@@ -166,10 +155,10 @@ void cpu_op_bpl(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 }
 
 void cpu_op_brk(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu_push16(cpu, cpu->reg_pc + 1);
-	cpu_push(cpu, cpu->reg_c.raw | 0b00110000);
-	uint8_t lo = cpu->bus_read(cpu->bus, 0xFFFC);
-	uint8_t hi = cpu->bus_read(cpu->bus, 0xFFFD);
+	cpu_push16(cpu->reg_pc + 1);
+	cpu_push(cpu->reg_c.raw | 0b00110000);
+	uint8_t lo = cpu_read(0xFFFC);
+	uint8_t hi = cpu_read(0xFFFD);
 	cpu->reg_pc = hi << 8 | lo;
 }
 
@@ -205,59 +194,59 @@ void cpu_op_clv(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 
 void cpu_op_cmp(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	cpu->reg_c.C = cpu->reg_a >= val;
-	cpu_set_zn(cpu, cpu->reg_a - val);
+	cpu_set_zn(cpu->reg_a - val);
 }
 
 void cpu_op_cpx(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	cpu->reg_c.C = cpu->reg_x >= val;
-	cpu_set_zn(cpu, cpu->reg_x - val);
+	cpu_set_zn(cpu->reg_x - val);
 }
 
 void cpu_op_cpy(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	cpu->reg_c.C = cpu->reg_y >= val;
-	cpu_set_zn(cpu, cpu->reg_y - val);
+	cpu_set_zn(cpu->reg_y - val);
 }
 
 void cpu_op_dec(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr) - 1;
-	cpu->bus_write(cpu->bus, addr, val);
-	cpu_set_zn(cpu, val);
+	uint8_t val = cpu_read(addr) - 1;
+	cpu_write(addr, val);
+	cpu_set_zn(val);
 }
 
 void cpu_op_dex(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu_set_zn(cpu, --cpu->reg_x);
+	cpu_set_zn(--cpu->reg_x);
 }
 
 void cpu_op_dey(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu_set_zn(cpu, --cpu->reg_y);
+	cpu_set_zn(--cpu->reg_y);
 }
 
 void cpu_op_eor(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu->reg_a ^= cpu->bus_read(cpu->bus, addr);
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu->reg_a ^= cpu_read(addr);
+	cpu_set_zn(cpu->reg_a);
 }
 
 void cpu_op_inc(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr) + 1;
-	cpu->bus_write(cpu->bus, addr, val);
-	cpu_set_zn(cpu, val);
+	uint8_t val = cpu_read(addr) + 1;
+	cpu_write(addr, val);
+	cpu_set_zn(val);
 }
 
 void cpu_op_inx(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu_set_zn(cpu, ++cpu->reg_x);
+	cpu_set_zn(++cpu->reg_x);
 }
 
 void cpu_op_iny(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu_set_zn(cpu, ++cpu->reg_y);
+	cpu_set_zn(++cpu->reg_y);
 }
 
 void cpu_op_jmp(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
@@ -265,41 +254,41 @@ void cpu_op_jmp(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 }
 
 void cpu_op_jsr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu_push16(cpu, cpu->reg_pc + 1);
+	cpu_push16(cpu->reg_pc + 1);
 	cpu->reg_pc = cpu_get_opaddr(cpu, addrmode);
 }
 
 void cpu_op_lda(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu->reg_a = cpu->bus_read(cpu->bus, addr);
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu->reg_a = cpu_read(addr);
+	cpu_set_zn(cpu->reg_a);
 }
 
 void cpu_op_ldx(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu->reg_x = cpu->bus_read(cpu->bus, addr);
-	cpu_set_zn(cpu, cpu->reg_x);
+	cpu->reg_x = cpu_read(addr);
+	cpu_set_zn(cpu->reg_x);
 }
 
 void cpu_op_ldy(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu->reg_y = cpu->bus_read(cpu->bus, addr);
-	cpu_set_zn(cpu, cpu->reg_y);
+	cpu->reg_y = cpu_read(addr);
+	cpu_set_zn(cpu->reg_y);
 }
 
 void cpu_op_lsr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	if (addrmode == CPU_ADDR_ACC) {
 		cpu->reg_c.C = cpu->reg_a;
 		cpu->reg_a >>= 1;
-		cpu_set_zn(cpu, cpu->reg_a);
+		cpu_set_zn(cpu->reg_a);
 		return;
 	}
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	cpu->reg_c.C = val;
 	val >>= 1;
-	cpu->bus_write(cpu->bus, addr, val);
-	cpu_set_zn(cpu, val);
+	cpu_write(addr, val);
+	cpu_set_zn(val);
 }
 
 void cpu_op_nop(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
@@ -308,25 +297,25 @@ void cpu_op_nop(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 
 void cpu_op_ora(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu->reg_a |= cpu->bus_read(cpu->bus, addr);
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu->reg_a |= cpu_read(addr);
+	cpu_set_zn(cpu->reg_a);
 }
 
 void cpu_op_pha(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu_push(cpu, cpu->reg_a);
+	cpu_push(cpu->reg_a);
 }
 
 void cpu_op_php(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu_push(cpu, cpu->reg_c.raw | 0b00110000);
+	cpu_push(cpu->reg_c.raw | 0b00110000);
 }
 
 void cpu_op_pla(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu->reg_a = cpu_pull(cpu);
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu->reg_a = cpu_pull();
+	cpu_set_zn(cpu->reg_a);
 }
 
 void cpu_op_plp(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu->reg_c.raw = (cpu_pull(cpu) & 0b11101111) | 0b00100000;
+	cpu->reg_c.raw = (cpu_pull() & 0b11101111) | 0b00100000;
 }
 
 void cpu_op_rol(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
@@ -334,15 +323,15 @@ void cpu_op_rol(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	if (addrmode == CPU_ADDR_ACC) {
 		cpu->reg_c.C = cpu->reg_a >> 7;
 		cpu->reg_a = (cpu->reg_a << 1) | c;
-		cpu_set_zn(cpu, cpu->reg_a);
+		cpu_set_zn(cpu->reg_a);
 		return;
 	}
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	cpu->reg_c.C = val >> 7;
 	val = (val << 1) | c;
-	cpu->bus_write(cpu->bus, addr, val);
-	cpu_set_zn(cpu, val);
+	cpu_write(addr, val);
+	cpu_set_zn(val);
 }
 
 void cpu_op_ror(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
@@ -350,29 +339,29 @@ void cpu_op_ror(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	if (addrmode == CPU_ADDR_ACC) {
 		cpu->reg_c.C = cpu->reg_a;
 		cpu->reg_a = (cpu->reg_a >> 1) | c;
-		cpu_set_zn(cpu, cpu->reg_a);
+		cpu_set_zn(cpu->reg_a);
 		return;
 	}
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	cpu->reg_c.C = val;
 	val = (val >> 1) | c;
-	cpu->bus_write(cpu->bus, addr, val);
-	cpu_set_zn(cpu, val);
+	cpu_write(addr, val);
+	cpu_set_zn(val);
 }
 
 void cpu_op_rti(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu->reg_c.raw = (cpu_pull(cpu) & 0b11101111) | 0b00100000;
-	cpu->reg_pc = cpu_pull16(cpu);
+	cpu->reg_c.raw = (cpu_pull() & 0b11101111) | 0b00100000;
+	cpu->reg_pc = cpu_pull16();
 }
 
 void cpu_op_rts(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu->reg_pc = cpu_pull16(cpu) + 1;
+	cpu->reg_pc = cpu_pull16() + 1;
 }
 
 void cpu_op_sbc(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu_add_acc(cpu, ~cpu->bus_read(cpu->bus, addr));
+	cpu_add_acc(cpu, ~cpu_read(addr));
 }
 
 void cpu_op_sec(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
@@ -388,35 +377,35 @@ void cpu_op_sei(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 }
 
 void cpu_op_sta(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu->bus_write(cpu->bus, cpu_get_opaddr(cpu, addrmode), cpu->reg_a);
+	cpu_write(cpu_get_opaddr(cpu, addrmode), cpu->reg_a);
 }
 
 void cpu_op_stx(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu->bus_write(cpu->bus, cpu_get_opaddr(cpu, addrmode), cpu->reg_x);
+	cpu_write(cpu_get_opaddr(cpu, addrmode), cpu->reg_x);
 }
 
 void cpu_op_sty(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu->bus_write(cpu->bus, cpu_get_opaddr(cpu, addrmode), cpu->reg_y);
+	cpu_write(cpu_get_opaddr(cpu, addrmode), cpu->reg_y);
 }
 
 void cpu_op_tax(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu->reg_x = cpu->reg_a;
-	cpu_set_zn(cpu, cpu->reg_x);
+	cpu_set_zn(cpu->reg_x);
 }
 
 void cpu_op_tay(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu->reg_y = cpu->reg_a;
-	cpu_set_zn(cpu, cpu->reg_y);
+	cpu_set_zn(cpu->reg_y);
 }
 
 void cpu_op_tsx(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu->reg_x = cpu->reg_sp;
-	cpu_set_zn(cpu, cpu->reg_x);
+	cpu_set_zn(cpu->reg_x);
 }
 
 void cpu_op_txa(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu->reg_a = cpu->reg_x;
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu_set_zn(cpu->reg_a);
 }
 
 void cpu_op_txs(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
@@ -425,17 +414,17 @@ void cpu_op_txs(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 
 void cpu_op_tya(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu->reg_a = cpu->reg_y;
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu_set_zn(cpu->reg_a);
 }
 
-////////
+// @trevor do these for me
 
 void cpu_op_alr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu->reg_a &= cpu->bus_read(cpu->bus, addr);
+	cpu->reg_a &= cpu_read(addr);
 	cpu->reg_c.C = cpu->reg_a;
 	cpu->reg_a >>= 1;
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu_set_zn(cpu->reg_a);
 }
 
 void cpu_op_anc(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
@@ -444,15 +433,15 @@ void cpu_op_arr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
 
 void cpu_op_dcp(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr) - 1;
-	cpu->bus_write(cpu->bus, addr, val);
-	cpu_set_zn(cpu, cpu->reg_a - val);
+	uint8_t val = cpu_read(addr) - 1;
+	cpu_write(addr, val);
+	cpu_set_zn(cpu->reg_a - val);
 };
 
 void cpu_op_isc(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr) + 1;
-	cpu->bus_write(cpu->bus, addr, val);
+	uint8_t val = cpu_read(addr) + 1;
+	cpu_write(addr, val);
 	cpu_add_acc(cpu, ~val);
 };
 
@@ -461,36 +450,36 @@ void cpu_op_las(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
 
 void cpu_op_lax(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu->reg_a = cpu->reg_x = cpu->bus_read(cpu->bus, addr);
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu->reg_a = cpu->reg_x = cpu_read(addr);
+	cpu_set_zn(cpu->reg_a);
 };
 
 void cpu_op_lxa(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
 
 void cpu_op_rla(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	uint8_t c = cpu->reg_c.C;
 	cpu->reg_c.C = val >> 7;
 	val = (val << 1) | c;
-	cpu->bus_write(cpu->bus, addr, val);
+	cpu_write(addr, val);
 	cpu->reg_a &= val;
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu_set_zn(cpu->reg_a);
 };
 
 void cpu_op_rra(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	uint8_t c = cpu->reg_c.C << 7;
 	cpu->reg_c.C = val;
 	val = (val >> 1) | c;
-	cpu->bus_write(cpu->bus, addr, val);
+	cpu_write(addr, val);
 	cpu_add_acc(cpu, val);
 };
 
 void cpu_op_sax(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	cpu->bus_write(cpu->bus, addr, cpu->reg_a & cpu->reg_x);
+	cpu_write(addr, cpu->reg_a & cpu->reg_x);
 };
 
 void cpu_op_sbx(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
@@ -500,22 +489,22 @@ void cpu_op_shy(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
 
 void cpu_op_slo(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	cpu->reg_c.C = val >> 7;
 	val <<= 1;
-	cpu->bus_write(cpu->bus, addr, val);
+	cpu_write(addr, val);
 	cpu->reg_a |= val;
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu_set_zn(cpu->reg_a);
 };
 
 void cpu_op_sre(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	uint16_t addr = cpu_get_opaddr(cpu, addrmode);
-	uint8_t val = cpu->bus_read(cpu->bus, addr);
+	uint8_t val = cpu_read(addr);
 	cpu->reg_c.C = val;
 	val >>= 1;
-	cpu->bus_write(cpu->bus, addr, val);
+	cpu_write(addr, val);
 	cpu->reg_a ^= val;
-	cpu_set_zn(cpu, cpu->reg_a);
+	cpu_set_zn(cpu->reg_a);
 };
 
 void cpu_op_tas(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
@@ -523,9 +512,6 @@ void cpu_op_tas(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {};
 void cpu_op_usb(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu_op_sbc(cpu, addrmode);
 };
-
-
-
 
 struct cpu_instruction cpu_instruction_map[256] = {
 	{CPU_ADDR_IMP, cpu_op_brk, 7, 0}, // 0x00
@@ -785,12 +771,4 @@ struct cpu_instruction cpu_instruction_map[256] = {
 	{CPU_ADDR_ABX, cpu_op_inc, 7, 0}, // 0xfe
 	{CPU_ADDR_ABX, cpu_op_isc, 7, 0}, // 0xff
 };
-
-int cpu_tick(struct CPU *cpu) {
-	uint8_t op = cpu->bus_read(cpu->bus, cpu->reg_pc++);
-	struct cpu_instruction inst = cpu_instruction_map[op];
-	cpu->inc_cycles = 0;
-	inst.opf(cpu, inst.addrmode);
-	return inst.cycles + inst.inc_cross * cpu->inc_cycles;
-}
 
