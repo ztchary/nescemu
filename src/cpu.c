@@ -8,9 +8,6 @@
 #define cpu_push(value) cpu_write((cpu->reg_sp--) | 0x100, value)
 #define cpu_pull() cpu_read((++cpu->reg_sp) | 0x100)
 
-#define cpu_push16(value) uint16_t v = value; cpu_push(v >> 8); cpu_push(v & 0xff)
-#define cpu_pull16() (cpu_pull() | (cpu_pull() << 8))
-
 enum CPU_ADDRMODE {
 	CPU_ADDR_IMM,
 	CPU_ADDR_REL,
@@ -177,7 +174,8 @@ void cpu_op_bpl(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 }
 
 void cpu_op_brk(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu_push16(cpu->reg_pc + 1);
+	cpu_push(++cpu->reg_pc >> 8);
+	cpu_push(cpu->reg_pc & 0xff);
 	cpu_push(cpu->reg_c.raw | 0b00110000);
 	uint8_t lo = cpu_read(0xFFFC);
 	uint8_t hi = cpu_read(0xFFFD);
@@ -276,7 +274,8 @@ void cpu_op_jmp(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 }
 
 void cpu_op_jsr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu_push16(cpu->reg_pc + 1);
+	cpu_push((cpu->reg_pc + 1) >> 8);
+	cpu_push((cpu->reg_pc + 1) & 0xff);
 	cpu->reg_pc = cpu_get_opaddr(cpu, addrmode);
 }
 
@@ -374,11 +373,14 @@ void cpu_op_ror(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 
 void cpu_op_rti(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
 	cpu->reg_c.raw = (cpu_pull() & 0b11101111) | 0b00100000;
-	cpu->reg_pc = cpu_pull16();
+	cpu->reg_pc = cpu_pull();
+	cpu->reg_pc |= cpu_pull() << 8;
 }
 
 void cpu_op_rts(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
-	cpu->reg_pc = cpu_pull16() + 1;
+	cpu->reg_pc = cpu_pull();
+	cpu->reg_pc |= cpu_pull() << 8;
+	cpu->reg_pc++;
 }
 
 void cpu_op_sbc(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {

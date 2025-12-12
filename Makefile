@@ -1,6 +1,6 @@
 CC=cc
 CFLAGS=-Wall -Werror
 
-main: src/* include/*
-	$(CC) $(CFLAGS) -Iinclude -o main src/* -lSDL2
+main:
+	$(CC) $(CFLAGS) -Iinclude -o main src/*.c src/mappers/*.c -lSDL2
 

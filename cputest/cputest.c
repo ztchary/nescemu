@@ -34,7 +34,7 @@ int main() {
 		.bus_write = (void (*)(void *, uint16_t, uint8_t))bus_write,
 	};
 	for (int cycles = 7; cycles <= 26554;) {
-		printf("%04X %02X A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:%d\n", cpu.reg_pc, bus_read(&bus, cpu.reg_pc), cpu.reg_a, cpu.reg_x, cpu.reg_y, cpu.reg_c, cpu.reg_sp, cycles);
+		printf("%04X %02X A:%02X X:%02X Y:%02X P:%02X SP:%02X CYC:%d\n", cpu.reg_pc, bus_read(&bus, cpu.reg_pc), cpu.reg_a, cpu.reg_x, cpu.reg_y, cpu.reg_c.raw, cpu.reg_sp, cycles);
 		cycles += cpu_tick(&cpu);
 	}
 }

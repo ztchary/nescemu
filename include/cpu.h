@@ -24,6 +24,7 @@ struct CPU {
 	uint8_t (*bus_read)(void *, uint16_t);
 	void (*bus_write)(void *, uint16_t, uint8_t);
 	int inc_cycles;
+	bool jammed;
 };
 
 int cpu_tick(struct CPU *);
