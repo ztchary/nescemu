@@ -1,7 +1,9 @@
 #pragma once
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+
 #include "mapper.h"
 
 enum CART_MIRRORING {

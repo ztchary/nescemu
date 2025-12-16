@@ -1,3 +1,3 @@
-gcc -Wall -Werror cputest.c ../src/cpu.c -I../include -o cputest
+gcc -Wall -Werror src/* -Iinclude ../src/cpu.c -o cputest
 ./cputest > nestest.log2
 diff nestest.log nestest.log2 | head -5

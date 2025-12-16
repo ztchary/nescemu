@@ -1,5 +1,7 @@
 #pragma once
+
 #include <stdint.h>
+
 #include "cart.h"
 
 struct cart;

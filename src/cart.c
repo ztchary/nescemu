@@ -1,7 +1,9 @@
 #include "cart.h"
 
+const char *magic = "NES\x1a";
+
 struct __attribute__((packed)) cart_header {
-	char magic[4];
+	uint32_t magic;
 	uint8_t prg_rom;
 	uint8_t chr_rom;
 	struct {
@@ -19,21 +21,33 @@ struct __attribute__((packed)) cart_header {
 };
 
 void cart_init(struct cart *cart, char *path) {
+	*cart = (struct cart){0};
 	FILE *fp = fopen(path, "rb");
-	if (fp == NULL) return;
+	if (fp == NULL) {
+		return;
+	}
 	struct cart_header header;
 	fread((char *)&header, sizeof(header), 1, fp);
+	if (header.magic != *(uint32_t *)magic) {
+		return;
+	}
 	if (header.trainer) {
 		cart->trainer = malloc(512);
 		fread(cart->trainer, sizeof(512), 1, fp);
 	}
-	int prg_size = (header.prg_rom | !header.prg_rom) * 0x4000;
-	int chr_size = (header.chr_rom | !header.chr_rom) * 0x2000;
-	cart->prg_rom = malloc(prg_size);
-	cart->chr_rom = malloc(chr_size);
-	fread(cart->prg_rom, 1, prg_size, fp);
-	fread(cart->chr_rom, 1, chr_size, fp);
+	cart->prg_rom_size = (header.prg_rom | !header.prg_rom) * 0x4000;
+	cart->chr_rom_size = (header.chr_rom | !header.chr_rom) * 0x2000;
+	cart->prg_rom = malloc(cart->prg_rom_size);
+	cart->chr_rom = malloc(cart->chr_rom_size);
+	fread(cart->prg_rom, 1, cart->prg_rom_size, fp);
+	fread(cart->chr_rom, 1, cart->chr_rom_size, fp);
 	uint8_t mapper = (header.mapper_hi << 4) | header.mapper_lo;
 	cart->mapper = mappers[mapper];
+}
+
+void cart_destroy(struct cart *cart) {
+	if (cart->prg_rom) free(cart->prg_rom);
+	if (cart->chr_rom) free(cart->chr_rom);
+	if (cart->trainer) free(cart->trainer);
 }
 

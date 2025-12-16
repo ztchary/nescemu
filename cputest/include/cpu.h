@@ -1,8 +1,6 @@
 #pragma once
-
-#include <stdint.h>
-
 #include "bus.h"
+#include <stdint.h>
 
 struct CPU {
 	uint8_t reg_a;
@@ -29,6 +27,4 @@ struct CPU {
 };
 
 int cpu_tick(struct CPU *);
-
-void cpu_reset(struct CPU *);
 

@@ -1,7 +1,7 @@
 #include "cpu.h"
 
-#define cpu_read(addr) cpu->bus_read(cpu->bus, addr)
-#define cpu_write(addr, value) cpu->bus_write(cpu->bus, addr, value)
+#define cpu_read(addr) bus_read_prg(cpu->bus, addr)
+#define cpu_write(addr, value) bus_write_prg(cpu->bus, addr, value)
 
 #define cpu_set_zn(value) uint8_t v = value; cpu->reg_c.Z = v == 0; cpu->reg_c.N = v >> 7
 
@@ -39,6 +39,10 @@ int cpu_tick(struct CPU *cpu) {
 	cpu->inc_cycles = 0;
 	inst.opf(cpu, inst.addrmode);
 	return inst.cycles + inst.inc_cross * cpu->inc_cycles;
+}
+
+void cpu_reset(struct CPU *cpu) {
+	cpu->reg_pc = cpu_read(0xFFFD) << 8 | cpu_read(0xFFFC);
 }
 
 uint16_t cpu_get_opaddr(struct CPU *cpu, enum CPU_ADDRMODE addrmode) {
