@@ -30,6 +30,8 @@ struct PPU {
 		};
 		uint8_t raw;
 	} reg_mask;
+	uint8_t scroll_x;
+	uint8_t scroll_y;
 	struct BUS *bus;
 };
 
